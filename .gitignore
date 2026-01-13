@@ -10,6 +10,7 @@ lerna-debug.log*
 dist/
 build/
 out/
+.next/
 *.tsbuildinfo
 
 # Environment variables
