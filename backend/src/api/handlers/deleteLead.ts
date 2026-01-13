@@ -13,7 +13,6 @@ import { logger } from '../../lib/logger';
 import {
   asyncErrorHandler,
   AuthorizationError,
-  NotFoundError,
 } from '../middleware/errorHandler';
 import { canDeleteLead } from '../../models/User';
 
@@ -53,11 +52,15 @@ export const handleDeleteLead = asyncErrorHandler(
     const user = getAuthenticatedUser(authReq);
 
     // Validate lead ID
-    const leadId = validateUUID(req.params.id, 'Lead ID');
+    const leadIdParam = req.params['id'];
+    if (!leadIdParam) {
+      throw new Error('Lead ID parameter is required');
+    }
+    const leadId = validateUUID(leadIdParam, 'Lead ID');
 
     // Extract optional parameters
-    const reason = req.query.reason as string | undefined;
-    const gdprRequest = req.query.gdprRequest === 'true';
+    const reason = req.query['reason'] as string | undefined;
+    const gdprRequest = req.query['gdprRequest'] === 'true';
 
     logger.info(
       {

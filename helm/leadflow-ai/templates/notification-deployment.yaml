@@ -1,0 +1,85 @@
+{{- if .Values.notificationService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "leadflow-ai.fullname" . }}-notification
+  labels:
+    {{- include "leadflow-ai.notification.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.notificationService.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "leadflow-ai.notification.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- include "leadflow-ai.notification.daprAnnotations" . | nindent 8 }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "leadflow-ai.notification.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "leadflow-ai.serviceAccountName" . }}
+      {{- end }}
+      containers:
+      - name: notification-service
+        image: {{ include "leadflow-ai.notification.image" . }}
+        imagePullPolicy: {{ .Values.notificationService.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 8001
+          protocol: TCP
+        env:
+        {{- range $key, $value := .Values.notificationService.env }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        # SendGrid API key from secret
+        - name: SENDGRID_API_KEY
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.secrets.names.sendgrid }}
+              key: SENDGRID_API_KEY
+              optional: true
+        # Twilio credentials from secret
+        - name: TWILIO_ACCOUNT_SID
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.secrets.names.twilio }}
+              key: TWILIO_ACCOUNT_SID
+              optional: true
+        - name: TWILIO_AUTH_TOKEN
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.secrets.names.twilio }}
+              key: TWILIO_AUTH_TOKEN
+              optional: true
+        - name: TWILIO_WHATSAPP_NUMBER
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.secrets.names.twilio }}
+              key: TWILIO_WHATSAPP_NUMBER
+              optional: true
+        # Kafka configuration
+        {{- if .Values.kafka.brokers }}
+        - name: KAFKA_BROKERS
+          value: {{ join "," .Values.kafka.brokers | quote }}
+        {{- end }}
+        # Load ConfigMap values
+        envFrom:
+        {{- include "leadflow-ai.envFromConfigMap" . | nindent 8 }}
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8001
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8001
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          {{- toYaml .Values.notificationService.resources | nindent 10 }}
+{{- end }}

@@ -1,0 +1,481 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "LeadFlow AI Event Schemas",
+  "description": "JSON Schema definitions for SNS/SQS events in the Lead Management system",
+  "definitions": {
+    "BaseEvent": {
+      "type": "object",
+      "required": ["eventId", "eventType", "timestamp", "source", "schemaVersion", "data"],
+      "properties": {
+        "eventId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique identifier for this event (used for idempotency)"
+        },
+        "eventType": {
+          "type": "string",
+          "description": "Type of event (e.g., lead.created, lead.updated, lead.qualified)"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "ISO 8601 timestamp when event occurred"
+        },
+        "source": {
+          "type": "string",
+          "description": "Service that emitted the event (e.g., lead-service)"
+        },
+        "schemaVersion": {
+          "type": "string",
+          "pattern": "^\\d+\\.\\d+$",
+          "description": "Event schema version for backward compatibility (e.g., 1.0)"
+        },
+        "data": {
+          "type": "object",
+          "description": "Event-specific payload"
+        },
+        "metadata": {
+          "type": "object",
+          "description": "Additional context (trace IDs, user IDs, etc.)",
+          "properties": {
+            "traceId": {
+              "type": "string",
+              "description": "AWS X-Ray trace ID for distributed tracing"
+            },
+            "userId": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User who triggered the event"
+            }
+          }
+        }
+      }
+    },
+    "LeadCreatedEvent": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/BaseEvent"
+        },
+        {
+          "properties": {
+            "eventType": {
+              "const": "lead.created"
+            },
+            "data": {
+              "type": "object",
+              "required": ["leadId", "name", "email", "leadSource", "createdBy"],
+              "properties": {
+                "leadId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Unique identifier of the created lead"
+                },
+                "name": {
+                  "type": "string",
+                  "description": "Name of the lead contact person"
+                },
+                "email": {
+                  "type": "string",
+                  "format": "email",
+                  "description": "Email address of the lead"
+                },
+                "company": {
+                  "type": "string",
+                  "description": "Company name (if provided)"
+                },
+                "leadSource": {
+                  "type": "string",
+                  "enum": ["website", "referral", "ad", "cold_outreach"],
+                  "description": "Origin of the lead"
+                },
+                "assignedTo": {
+                  "type": ["string", "null"],
+                  "format": "uuid",
+                  "description": "User ID of assigned sales rep (null if unassigned)"
+                },
+                "createdBy": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "User ID who created the lead"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Published when a new lead is created (POST /api/v1/leads)"
+    },
+    "LeadUpdatedEvent": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/BaseEvent"
+        },
+        {
+          "properties": {
+            "eventType": {
+              "const": "lead.updated"
+            },
+            "data": {
+              "type": "object",
+              "required": ["leadId", "changedFields", "updatedBy"],
+              "properties": {
+                "leadId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Unique identifier of the updated lead"
+                },
+                "changedFields": {
+                  "type": "array",
+                  "items": {
+                    "type": "string"
+                  },
+                  "description": "List of fields that were modified"
+                },
+                "previousValues": {
+                  "type": "object",
+                  "description": "Previous values of changed fields"
+                },
+                "newValues": {
+                  "type": "object",
+                  "description": "New values of changed fields"
+                },
+                "updatedBy": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "User ID who updated the lead"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Published when a lead is updated (PATCH /api/v1/leads/:id)"
+    },
+    "LeadQualifiedEvent": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/BaseEvent"
+        },
+        {
+          "properties": {
+            "eventType": {
+              "const": "lead.qualified"
+            },
+            "data": {
+              "type": "object",
+              "required": ["leadId", "leadScoreId", "totalScore", "qualificationStatus"],
+              "properties": {
+                "leadId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Unique identifier of the qualified lead"
+                },
+                "leadScoreId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Unique identifier of the lead score record"
+                },
+                "budgetScore": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 25,
+                  "description": "Budget fit score (0-25)"
+                },
+                "authorityScore": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 25,
+                  "description": "Authority/decision-maker score (0-25)"
+                },
+                "needScore": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 25,
+                  "description": "Need/pain point score (0-25)"
+                },
+                "timelineScore": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 25,
+                  "description": "Purchase timeline score (0-25)"
+                },
+                "totalScore": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100,
+                  "description": "Total BANT score (0-100)"
+                },
+                "qualificationStatus": {
+                  "type": "string",
+                  "enum": ["qualified", "disqualified", "in_progress"],
+                  "description": "Qualification result based on total score"
+                },
+                "assignedTo": {
+                  "type": ["string", "null"],
+                  "format": "uuid",
+                  "description": "User ID of assigned sales rep (for notifications)"
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0.0,
+                  "maximum": 1.0,
+                  "description": "AI confidence in scoring (0.0-1.0)"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Published when lead qualification completes (POST /api/v1/leads/:id/qualify)"
+    },
+    "LeadDeletedEvent": {
+      "allOf": [
+        {
+          "$ref": "#/definitions/BaseEvent"
+        },
+        {
+          "properties": {
+            "eventType": {
+              "const": "lead.deleted"
+            },
+            "data": {
+              "type": "object",
+              "required": ["leadId", "email", "deletedBy", "reason"],
+              "properties": {
+                "leadId": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "Unique identifier of the deleted lead"
+                },
+                "email": {
+                  "type": "string",
+                  "format": "email",
+                  "description": "Email address of the deleted lead (for audit)"
+                },
+                "deletedBy": {
+                  "type": "string",
+                  "format": "uuid",
+                  "description": "User ID who deleted the lead (admin only)"
+                },
+                "reason": {
+                  "type": "string",
+                  "description": "Reason for deletion (e.g., duplicate, spam, GDPR request)"
+                },
+                "gdprRequest": {
+                  "type": "boolean",
+                  "description": "True if deletion was triggered by GDPR data erasure request"
+                }
+              }
+            }
+          }
+        }
+      ],
+      "description": "Published when a lead is permanently deleted (DELETE /api/v1/leads/:id)"
+    },
+    "AIProcessingRequest": {
+      "type": "object",
+      "required": ["requestId", "leadId", "retryCount", "timestamp"],
+      "properties": {
+        "requestId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Unique identifier for this AI processing request"
+        },
+        "leadId": {
+          "type": "string",
+          "format": "uuid",
+          "description": "Lead to be qualified"
+        },
+        "retryCount": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 3,
+          "description": "Number of retry attempts (0 = first attempt, max 3)"
+        },
+        "timestamp": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Timestamp when request was queued"
+        },
+        "error": {
+          "type": "object",
+          "description": "Error details from previous attempt (if retry)",
+          "properties": {
+            "code": {
+              "type": "string",
+              "description": "Error code from Claude API"
+            },
+            "message": {
+              "type": "string",
+              "description": "Error message"
+            }
+          }
+        },
+        "metadata": {
+          "type": "object",
+          "properties": {
+            "traceId": {
+              "type": "string",
+              "description": "AWS X-Ray trace ID"
+            },
+            "userId": {
+              "type": "string",
+              "format": "uuid",
+              "description": "User who triggered qualification"
+            }
+          }
+        }
+      },
+      "description": "SQS message for async AI qualification processing (retry logic)"
+    }
+  },
+  "examples": {
+    "leadCreatedExample": {
+      "eventId": "550e8400-e29b-41d4-a716-446655440000",
+      "eventType": "lead.created",
+      "timestamp": "2025-12-31T10:30:00Z",
+      "source": "lead-service",
+      "schemaVersion": "1.0",
+      "data": {
+        "leadId": "abc-123-def-456",
+        "name": "John Doe",
+        "email": "john.doe@example.com",
+        "company": "Acme Corp",
+        "leadSource": "website",
+        "assignedTo": null,
+        "createdBy": "user-789"
+      },
+      "metadata": {
+        "traceId": "1-67a2b3c4-5d6e7f8g9h0i1j2k3l4m5n6o",
+        "userId": "user-789"
+      }
+    },
+    "leadUpdatedExample": {
+      "eventId": "660f9511-f39c-52e5-b827-557766551111",
+      "eventType": "lead.updated",
+      "timestamp": "2025-12-31T11:00:00Z",
+      "source": "lead-service",
+      "schemaVersion": "1.0",
+      "data": {
+        "leadId": "abc-123-def-456",
+        "changedFields": ["status", "assignedTo"],
+        "previousValues": {
+          "status": "new",
+          "assignedTo": null
+        },
+        "newValues": {
+          "status": "contacted",
+          "assignedTo": "user-456"
+        },
+        "updatedBy": "user-789"
+      },
+      "metadata": {
+        "traceId": "1-67a2b3c4-5d6e7f8g9h0i1j2k3l4m5n6o",
+        "userId": "user-789"
+      }
+    },
+    "leadQualifiedExample": {
+      "eventId": "770fa622-g40d-63f6-c938-668877662222",
+      "eventType": "lead.qualified",
+      "timestamp": "2025-12-31T11:15:00Z",
+      "source": "lead-service",
+      "schemaVersion": "1.0",
+      "data": {
+        "leadId": "abc-123-def-456",
+        "leadScoreId": "score-xyz-789",
+        "budgetScore": 23,
+        "authorityScore": 22,
+        "needScore": 20,
+        "timelineScore": 24,
+        "totalScore": 89,
+        "qualificationStatus": "qualified",
+        "assignedTo": "user-456",
+        "confidence": 0.92
+      },
+      "metadata": {
+        "traceId": "1-67a2b3c4-5d6e7f8g9h0i1j2k3l4m5n6o",
+        "userId": "user-789"
+      }
+    },
+    "leadDeletedExample": {
+      "eventId": "880gb733-h51e-74g7-d049-779988773333",
+      "eventType": "lead.deleted",
+      "timestamp": "2025-12-31T12:00:00Z",
+      "source": "lead-service",
+      "schemaVersion": "1.0",
+      "data": {
+        "leadId": "abc-123-def-456",
+        "email": "john.doe@example.com",
+        "deletedBy": "admin-user-123",
+        "reason": "GDPR data erasure request",
+        "gdprRequest": true
+      },
+      "metadata": {
+        "traceId": "1-67a2b3c4-5d6e7f8g9h0i1j2k3l4m5n6o",
+        "userId": "admin-user-123"
+      }
+    },
+    "aiProcessingRequestExample": {
+      "requestId": "ai-req-990hc844-i62f-85h8-e150-880099884444",
+      "leadId": "abc-123-def-456",
+      "retryCount": 1,
+      "timestamp": "2025-12-31T11:15:30Z",
+      "error": {
+        "code": "rate_limit_error",
+        "message": "Anthropic API rate limit exceeded"
+      },
+      "metadata": {
+        "traceId": "1-67a2b3c4-5d6e7f8g9h0i1j2k3l4m5n6o",
+        "userId": "user-789"
+      }
+    }
+  },
+  "eventRouting": {
+    "description": "SNS topic routing configuration",
+    "topics": {
+      "lead-events": {
+        "description": "Main topic for all lead lifecycle events",
+        "events": [
+          "lead.created",
+          "lead.updated",
+          "lead.qualified",
+          "lead.deleted"
+        ],
+        "subscribers": [
+          {
+            "type": "sqs",
+            "name": "notifications-queue",
+            "filterPolicy": {
+              "eventType": ["lead.created", "lead.qualified"]
+            }
+          },
+          {
+            "type": "sqs",
+            "name": "analytics-queue",
+            "filterPolicy": {}
+          },
+          {
+            "type": "lambda",
+            "name": "webhook-dispatcher",
+            "filterPolicy": {
+              "eventType": ["lead.qualified"],
+              "data.totalScore": [{ "numeric": [">=", 80] }]
+            }
+          }
+        ]
+      }
+    },
+    "queues": {
+      "ai-processing-queue": {
+        "description": "Queue for async AI qualification processing (retry logic)",
+        "messageType": "AIProcessingRequest",
+        "visibilityTimeout": 30,
+        "receiveMessageWaitTime": 20,
+        "deadLetterQueue": {
+          "name": "ai-processing-dlq",
+          "maxReceiveCount": 3
+        }
+      }
+    }
+  }
+}

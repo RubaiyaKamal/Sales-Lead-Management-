@@ -1,0 +1,69 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: kafka-pubsub
+  namespace: leadflow-ai
+spec:
+  type: pubsub.kafka
+  version: v1
+  metadata:
+    # Kafka broker addresses (Redpanda Cloud or local Redpanda)
+    - name: brokers
+      value: "localhost:9092"  # Override via values-dev.yaml or values-prod.yaml
+
+    # Consumer group configuration
+    - name: consumerGroup
+      value: "leadflow-ai-group"
+
+    # Client ID
+    - name: clientID
+      value: "leadflow-ai-client"
+
+    # Authentication (SASL for production Redpanda Cloud)
+    - name: authType
+      secretKeyRef:
+        name: leadflow-kafka-secret
+        key: authType
+      # value: "none" for local dev, "sasl" for production
+
+    - name: saslMechanism
+      value: "SCRAM-SHA-256"
+
+    - name: saslUsername
+      secretKeyRef:
+        name: leadflow-kafka-secret
+        key: saslUsername
+
+    - name: saslPassword
+      secretKeyRef:
+        name: leadflow-kafka-secret
+        key: saslPassword
+
+    # Consumer configuration
+    - name: consumeRetryInterval
+      value: "200ms"
+
+    - name: maxMessageBytes
+      value: "1048576"  # 1MB
+
+    # Topic auto-creation (disable in production)
+    - name: initialOffset
+      value: "newest"
+
+    # TLS for production
+    - name: skipVerify
+      value: "false"
+
+    - name: caCert
+      secretKeyRef:
+        name: leadflow-kafka-secret
+        key: caCert
+        optional: true
+
+---
+# Topic subscriptions configuration
+# Topics:
+# - lead-events: Lead lifecycle events (created, updated, deleted, qualified)
+# - notifications: Notification requests (email, WhatsApp)
+# - ai-qualification: AI qualification retry queue
+# - follow-up-events: Follow-up task events

@@ -1,0 +1,733 @@
+openapi: 3.0.3
+info:
+  title: LeadFlow AI - Lead Management API
+  description: |
+    REST API for lead CRUD operations with AI-powered BANT qualification.
+
+    Features:
+    - Create, read, update, delete leads
+    - AI qualification using Anthropic Claude (BANT methodology)
+    - Role-based access control (admin, manager, sales_rep)
+    - Pagination, filtering, search for lead lists
+    - Event-driven architecture with SNS/SQS integration
+  version: 1.0.0
+  contact:
+    name: LeadFlow AI Support
+    email: support@leadflowai.com
+  license:
+    name: Proprietary
+
+servers:
+  - url: https://api.leadflowai.com/v1
+    description: Production
+  - url: https://api-staging.leadflowai.com/v1
+    description: Staging
+  - url: http://localhost:3000/v1
+    description: Local development
+
+tags:
+  - name: leads
+    description: Lead CRUD operations
+  - name: qualification
+    description: AI-powered lead qualification
+
+security:
+  - BearerAuth: []
+
+paths:
+  /leads:
+    post:
+      tags: [leads]
+      summary: Create new lead
+      description: |
+        Creates a new lead with provided contact information. Lead is created in "new" status
+        with "not_qualified" qualification status and assigned_to = null (unassigned).
+
+        Triggers "lead.created" event to SNS.
+      operationId: createLead
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/CreateLeadRequest'
+            examples:
+              website_lead:
+                summary: Lead from website form
+                value:
+                  name: John Doe
+                  email: john.doe@example.com
+                  phone: +14155552671
+                  company: Acme Corp
+                  leadSource: website
+                  metadata:
+                    utm_source: google
+                    utm_medium: cpc
+                    utm_campaign: enterprise
+      responses:
+        '201':
+          description: Lead created successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lead'
+        '400':
+          description: Validation error or duplicate email
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              examples:
+                duplicate_email:
+                  summary: Duplicate email
+                  value:
+                    error:
+                      code: DUPLICATE_EMAIL
+                      message: Email already exists
+                      details: A lead with email john.doe@example.com already exists
+                      timestamp: '2025-12-31T10:30:00Z'
+                validation_error:
+                  summary: Missing required fields
+                  value:
+                    error:
+                      code: VALIDATION_ERROR
+                      message: Validation failed
+                      details:
+                        name: Required field missing
+                        email: Required field missing
+                        leadSource: Required field missing
+                      timestamp: '2025-12-31T10:30:00Z'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '429':
+          $ref: '#/components/responses/RateLimitExceeded'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    get:
+      tags: [leads]
+      summary: List leads
+      description: |
+        Returns paginated list of leads with optional filtering, searching, and sorting.
+
+        RBAC:
+        - sales_rep: Only leads assigned to them
+        - manager: Leads assigned to their team
+        - admin: All leads
+      operationId: listLeads
+      parameters:
+        - name: page
+          in: query
+          description: Page number (1-indexed)
+          schema:
+            type: integer
+            minimum: 1
+            default: 1
+        - name: limit
+          in: query
+          description: Results per page
+          schema:
+            type: integer
+            minimum: 1
+            maximum: 100
+            default: 20
+        - name: status
+          in: query
+          description: Filter by lead status
+          schema:
+            $ref: '#/components/schemas/LeadStatus'
+        - name: qualificationStatus
+          in: query
+          description: Filter by qualification status
+          schema:
+            $ref: '#/components/schemas/QualificationStatus'
+        - name: leadSource
+          in: query
+          description: Filter by lead source
+          schema:
+            $ref: '#/components/schemas/LeadSource'
+        - name: assignedTo
+          in: query
+          description: Filter by assigned user ID
+          schema:
+            type: string
+            format: uuid
+        - name: search
+          in: query
+          description: Search in name, email, company (case-insensitive)
+          schema:
+            type: string
+            minLength: 3
+            maxLength: 255
+        - name: sortBy
+          in: query
+          description: Field to sort by
+          schema:
+            type: string
+            enum: [created_at, updated_at, name, company, status]
+            default: created_at
+        - name: sortOrder
+          in: query
+          description: Sort order
+          schema:
+            type: string
+            enum: [asc, desc]
+            default: desc
+      responses:
+        '200':
+          description: Lead list retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadListResponse'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /leads/{leadId}:
+    get:
+      tags: [leads]
+      summary: Get lead by ID
+      description: |
+        Returns complete lead object including latest BANT score (if available).
+
+        RBAC:
+        - sales_rep: Only leads assigned to them
+        - manager: Leads assigned to their team
+        - admin: All leads
+      operationId: getLead
+      parameters:
+        - $ref: '#/components/parameters/LeadId'
+      responses:
+        '200':
+          description: Lead retrieved successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/LeadWithScore'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    patch:
+      tags: [leads]
+      summary: Update lead
+      description: |
+        Updates specific fields of a lead (partial update). Only provided fields are changed.
+
+        Triggers "lead.updated" event to SNS with changed fields.
+
+        RBAC:
+        - sales_rep: Only leads assigned to them
+        - manager: Leads assigned to their team
+        - admin: All leads
+      operationId: updateLead
+      parameters:
+        - $ref: '#/components/parameters/LeadId'
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: '#/components/schemas/UpdateLeadRequest'
+            examples:
+              update_status:
+                summary: Update status after contact
+                value:
+                  status: contacted
+                  metadata:
+                    contact_method: phone
+                    notes: Discussed product demo
+              reassign_lead:
+                summary: Reassign lead to another sales rep
+                value:
+                  assignedTo: user-uuid-456
+      responses:
+        '200':
+          description: Lead updated successfully
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Lead'
+        '400':
+          $ref: '#/components/responses/BadRequest'
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '409':
+          description: Conflict - lead was modified by another user
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: CONFLICT
+                  message: Lead was modified by another user. Please refresh and try again.
+                  timestamp: '2025-12-31T10:30:00Z'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+    delete:
+      tags: [leads]
+      summary: Delete lead
+      description: |
+        Permanently deletes a lead and all associated data (scores, activity logs) via CASCADE.
+
+        RBAC: Admin only
+
+        Used for:
+        - Removing duplicates, spam, test data
+        - GDPR data deletion requests
+      operationId: deleteLead
+      parameters:
+        - $ref: '#/components/parameters/LeadId'
+      responses:
+        '204':
+          description: Lead deleted successfully (no content)
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          description: Forbidden - only admins can delete leads
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/Error'
+              example:
+                error:
+                  code: FORBIDDEN
+                  message: Only administrators can delete leads
+                  timestamp: '2025-12-31T10:30:00Z'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+  /leads/{leadId}/qualify:
+    post:
+      tags: [qualification]
+      summary: Trigger AI lead qualification
+      description: |
+        Analyzes lead using Anthropic Claude API with BANT methodology (Budget, Authority, Need, Timeline).
+        Returns structured scores (0-25 per category, 0-100 total) with reasoning.
+
+        Updates lead qualification_status:
+        - total_score >= 60: qualified
+        - total_score < 40: disqualified
+        - 40 <= total_score < 60: in_progress
+
+        Triggers "lead.qualified" event to SNS if status changes to "qualified".
+
+        On Claude API failure: queues request to SQS for retry, returns 202 Accepted.
+
+        RBAC:
+        - sales_rep: Only leads assigned to them
+        - manager: Leads assigned to their team
+        - admin: All leads
+      operationId: qualifyLead
+      parameters:
+        - $ref: '#/components/parameters/LeadId'
+      responses:
+        '200':
+          description: Lead qualified successfully (synchronous)
+          content:
+            application/json:
+              schema:
+                $ref: '#/components/schemas/QualifyLeadResponse'
+        '202':
+          description: Qualification queued for async processing (Claude API error)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  message:
+                    type: string
+                    example: Qualification queued for processing
+                  queuedAt:
+                    type: string
+                    format: date-time
+        '401':
+          $ref: '#/components/responses/Unauthorized'
+        '403':
+          $ref: '#/components/responses/Forbidden'
+        '404':
+          $ref: '#/components/responses/NotFound'
+        '500':
+          $ref: '#/components/responses/InternalServerError'
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: AWS Cognito JWT token (ID token from authentication)
+
+  parameters:
+    LeadId:
+      name: leadId
+      in: path
+      required: true
+      description: Unique lead identifier (UUID)
+      schema:
+        type: string
+        format: uuid
+
+  schemas:
+    LeadSource:
+      type: string
+      enum: [website, referral, ad, cold_outreach]
+      description: Origin of the lead
+
+    LeadStatus:
+      type: string
+      enum: [new, contacted, qualified, unqualified, converted]
+      description: Current stage in sales pipeline
+
+    QualificationStatus:
+      type: string
+      enum: [not_qualified, in_progress, qualified, disqualified]
+      description: AI qualification state
+
+    CreateLeadRequest:
+      type: object
+      required: [name, email, leadSource]
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+          description: Full name of the lead contact person
+          example: John Doe
+        email:
+          type: string
+          format: email
+          maxLength: 255
+          description: Email address (must be unique)
+          example: john.doe@example.com
+        phone:
+          type: string
+          pattern: '^\+[1-9]\d{1,14}$'
+          description: Phone number in E.164 format
+          example: '+14155552671'
+        company:
+          type: string
+          maxLength: 255
+          description: Company or organization name
+          example: Acme Corp
+        leadSource:
+          $ref: '#/components/schemas/LeadSource'
+        metadata:
+          type: object
+          additionalProperties: true
+          description: Custom fields, UTM parameters, tags
+          example:
+            utm_source: google
+            utm_medium: cpc
+            utm_campaign: enterprise
+
+    UpdateLeadRequest:
+      type: object
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        email:
+          type: string
+          format: email
+          maxLength: 255
+        phone:
+          type: string
+          pattern: '^\+[1-9]\d{1,14}$'
+          nullable: true
+        company:
+          type: string
+          maxLength: 255
+          nullable: true
+        status:
+          $ref: '#/components/schemas/LeadStatus'
+        assignedTo:
+          type: string
+          format: uuid
+          nullable: true
+          description: User ID to assign lead to (null to unassign)
+        metadata:
+          type: object
+          additionalProperties: true
+
+    Lead:
+      type: object
+      required: [id, name, email, leadSource, status, qualificationStatus, createdAt, updatedAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        name:
+          type: string
+        email:
+          type: string
+          format: email
+        phone:
+          type: string
+          nullable: true
+        company:
+          type: string
+          nullable: true
+        leadSource:
+          $ref: '#/components/schemas/LeadSource'
+        status:
+          $ref: '#/components/schemas/LeadStatus'
+        qualificationStatus:
+          $ref: '#/components/schemas/QualificationStatus'
+        assignedTo:
+          type: string
+          format: uuid
+          nullable: true
+        createdBy:
+          type: string
+          format: uuid
+        metadata:
+          type: object
+          additionalProperties: true
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+        lastContactedAt:
+          type: string
+          format: date-time
+          nullable: true
+        convertedAt:
+          type: string
+          format: date-time
+          nullable: true
+
+    LeadScore:
+      type: object
+      required: [id, leadId, budgetScore, authorityScore, needScore, timelineScore, totalScore, reasoning, confidence, createdAt]
+      properties:
+        id:
+          type: string
+          format: uuid
+        leadId:
+          type: string
+          format: uuid
+        budgetScore:
+          type: integer
+          minimum: 0
+          maximum: 25
+          description: Budget fit score (0-25 points)
+        authorityScore:
+          type: integer
+          minimum: 0
+          maximum: 25
+          description: Authority/decision-maker score (0-25 points)
+        needScore:
+          type: integer
+          minimum: 0
+          maximum: 25
+          description: Need/pain point score (0-25 points)
+        timelineScore:
+          type: integer
+          minimum: 0
+          maximum: 25
+          description: Purchase timeline score (0-25 points)
+        totalScore:
+          type: integer
+          minimum: 0
+          maximum: 100
+          description: Total BANT score (sum of 4 categories)
+        reasoning:
+          type: string
+          description: AI-generated explanation of the scores
+        confidence:
+          type: number
+          format: float
+          minimum: 0.0
+          maximum: 1.0
+          description: AI confidence in scoring (0.0-1.0)
+        createdAt:
+          type: string
+          format: date-time
+
+    LeadWithScore:
+      allOf:
+        - $ref: '#/components/schemas/Lead'
+        - type: object
+          properties:
+            leadScore:
+              $ref: '#/components/schemas/LeadScore'
+              nullable: true
+              description: Latest BANT score (null if never qualified)
+
+    LeadListResponse:
+      type: object
+      required: [data, pagination]
+      properties:
+        data:
+          type: array
+          items:
+            $ref: '#/components/schemas/Lead'
+        pagination:
+          type: object
+          required: [page, limit, total, totalPages]
+          properties:
+            page:
+              type: integer
+              description: Current page number (1-indexed)
+            limit:
+              type: integer
+              description: Results per page
+            total:
+              type: integer
+              description: Total number of leads matching filters
+            totalPages:
+              type: integer
+              description: Total number of pages
+        meta:
+          type: object
+          description: Applied filters and metadata
+          additionalProperties: true
+
+    QualifyLeadResponse:
+      type: object
+      required: [leadScore, lead]
+      properties:
+        leadScore:
+          $ref: '#/components/schemas/LeadScore'
+        lead:
+          $ref: '#/components/schemas/Lead'
+          description: Updated lead with new qualification_status
+
+    Error:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message, timestamp]
+          properties:
+            code:
+              type: string
+              description: Machine-readable error code
+              enum:
+                - VALIDATION_ERROR
+                - DUPLICATE_EMAIL
+                - NOT_FOUND
+                - UNAUTHORIZED
+                - FORBIDDEN
+                - CONFLICT
+                - RATE_LIMIT_EXCEEDED
+                - INTERNAL_SERVER_ERROR
+            message:
+              type: string
+              description: Human-readable error message
+            details:
+              description: Additional error details (field-level validation errors, etc.)
+              oneOf:
+                - type: string
+                - type: object
+            timestamp:
+              type: string
+              format: date-time
+
+  responses:
+    BadRequest:
+      description: Invalid request parameters
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: VALIDATION_ERROR
+              message: Invalid request parameters
+              timestamp: '2025-12-31T10:30:00Z'
+
+    Unauthorized:
+      description: Missing or invalid authentication token
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: UNAUTHORIZED
+              message: Authentication required
+              timestamp: '2025-12-31T10:30:00Z'
+
+    Forbidden:
+      description: Insufficient permissions to perform this action
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: FORBIDDEN
+              message: You do not have permission to modify this lead
+              timestamp: '2025-12-31T10:30:00Z'
+
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: NOT_FOUND
+              message: Lead not found
+              timestamp: '2025-12-31T10:30:00Z'
+
+    RateLimitExceeded:
+      description: Rate limit exceeded
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: RATE_LIMIT_EXCEEDED
+              message: Rate limit exceeded. Maximum 100 requests per hour.
+              timestamp: '2025-12-31T10:30:00Z'
+      headers:
+        X-RateLimit-Limit:
+          schema:
+            type: integer
+          description: Request limit per hour
+        X-RateLimit-Remaining:
+          schema:
+            type: integer
+          description: Remaining requests in current window
+        X-RateLimit-Reset:
+          schema:
+            type: integer
+          description: Unix timestamp when limit resets
+
+    InternalServerError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: '#/components/schemas/Error'
+          example:
+            error:
+              code: INTERNAL_SERVER_ERROR
+              message: An unexpected error occurred
+              timestamp: '2025-12-31T10:30:00Z'

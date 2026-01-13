@@ -1,0 +1,36 @@
+# Patterns to ignore when building Helm packages
+
+# VCS
+.git/
+.gitignore
+.gitattributes
+.hgignore
+
+# Build artifacts
+*.swp
+*.bak
+*.tmp
+*.orig
+*~
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# CI/CD
+.gitlab-ci.yml
+.travis.yml
+.github/
+
+# Documentation (can be included if needed)
+OWNERS
+README.md
+LICENSE
+
+# Test files
+*_test.go
+*.test
+*.spec

@@ -1,0 +1,27 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: followup-cron
+  namespace: leadflow-ai
+spec:
+  type: bindings.cron
+  version: v1
+  metadata:
+    # Cron schedule (every 30 minutes in production)
+    # Format: "MINUTE HOUR DAY_OF_MONTH MONTH DAY_OF_WEEK"
+    - name: schedule
+      value: "*/30 * * * *"  # Every 30 minutes (override in values-dev.yaml for testing)
+
+    # Direction (input binding - triggers the follow-up service)
+    - name: direction
+      value: "input"
+
+---
+# Usage:
+# The follow-up service subscribes to this cron binding using Dapr Input Binding API
+# Every 30 minutes, Dapr will invoke the /followup-cron endpoint on the follow-up-service
+# The service will then:
+# 1. Query leads with upcoming follow-up dates
+# 2. Send notifications for due follow-ups
+# 3. Update lead status if needed
+# 4. Publish follow-up events to Kafka

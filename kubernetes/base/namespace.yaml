@@ -1,0 +1,11 @@
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: leadflow-ai
+  labels:
+    name: leadflow-ai
+    environment: production  # Override in values-dev.yaml
+    app.kubernetes.io/name: leadflow-ai
+    app.kubernetes.io/managed-by: helm
+    # Enable Dapr sidecar injection for all pods in this namespace
+    dapr.io/enabled: "true"

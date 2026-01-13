@@ -1,0 +1,129 @@
+# Development values for Minikube local development
+# Override production defaults for local testing
+
+global:
+  environment: development
+  domain: localhost
+
+backend:
+  replicaCount: 1  # Single replica for local dev
+
+  image:
+    repository: leadflow-ai/backend
+    pullPolicy: Never  # Use local images
+    tag: "latest"
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 100m
+      memory: 128Mi
+
+  autoscaling:
+    enabled: false  # Disable autoscaling for local dev
+
+  env:
+    NODE_ENV: development
+    LOG_LEVEL: debug
+    PORT: "8000"
+    DATABASE_URL: "postgresql://leadflow:dev_password_123@host.minikube.internal:5432/leadflow_dev"
+    REDIS_HOST: "host.minikube.internal"
+    REDIS_PORT: "6379"
+    KAFKA_BROKERS: "host.minikube.internal:9092"
+    JWT_SECRET: "dev_jwt_secret_replace_in_production"
+    ANTHROPIC_API_KEY: ""  # Set via .env or kubectl create secret
+
+notificationService:
+  replicaCount: 1
+
+  image:
+    repository: leadflow-ai/notification-service
+    pullPolicy: Never
+    tag: "latest"
+
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+  env:
+    NODE_ENV: development
+    LOG_LEVEL: debug
+    KAFKA_BROKERS: "host.minikube.internal:9092"
+
+followUpService:
+  replicaCount: 1
+
+  image:
+    repository: leadflow-ai/follow-up-service
+    pullPolicy: Never
+    tag: "latest"
+
+  resources:
+    limits:
+      cpu: 250m
+      memory: 256Mi
+    requests:
+      cpu: 50m
+      memory: 64Mi
+
+  cron:
+    schedule: "*/5 * * * *"  # Every 5 minutes for testing
+
+  env:
+    NODE_ENV: development
+    LOG_LEVEL: debug
+
+# Ingress for local development (NodePort or port-forward instead)
+ingress:
+  enabled: false  # Use kubectl port-forward for local access
+
+# External dependencies (point to Docker Compose services)
+postgresql:
+  host: host.minikube.internal
+  port: 5432
+  database: leadflow_dev
+  username: leadflow
+  sslMode: disable  # Disable SSL for local dev
+
+redis:
+  host: host.minikube.internal
+  port: 6379
+
+kafka:
+  brokers:
+    - host.minikube.internal:9092
+  saslEnabled: false  # No auth for local dev
+
+# Monitoring
+monitoring:
+  prometheus:
+    enabled: false  # Optional for local dev
+    serviceMonitor:
+      enabled: false
+
+  logging:
+    level: debug
+    format: json
+
+# Secrets (use dev values - NOT for production!)
+secrets:
+  create: true
+  data:
+    # Base64-encoded dev secrets (NOT secure, for local testing only)
+    DATABASE_URL: cG9zdGdyZXNxbDovL2xlYWRmbG93OmRldl9wYXNzd29yZF8xMjNAaG9zdC5taW5pa3ViZS5pbnRlcm5hbDo1NDMyL2xlYWRmbG93X2Rldg==
+    JWT_SECRET: ZGV2X2p3dF9zZWNyZXRfcmVwbGFjZV9pbl9wcm9kdWN0aW9u
+    ANTHROPIC_API_KEY: ""  # Set manually
+
+podDisruptionBudget:
+  enabled: false  # Not needed for single replicas
+
+# Dapr configuration for local dev
+dapr:
+  logLevel: debug
+  enableMetrics: false

@@ -1,0 +1,135 @@
+### AI Lead Qualification - Manual Test Cases
+### Use with REST Client extension or curl
+
+@baseUrl = http://localhost:3005/api/v1
+@leadId = 550e8400-e29b-41d4-a716-446655440000
+@token = eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VySWQiOiJ1c2VyLTEyMyIsInJvbGUiOiJhZG1pbiJ9.placeholder
+
+###############################################################################
+# Test 1: Qualify Lead with AI (Success Case)
+###############################################################################
+
+POST {{baseUrl}}/leads/{{leadId}}/qualify
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+### Expected Response: 200 OK
+# {
+#   "leadId": "550e8400-e29b-41d4-a716-446655440000",
+#   "leadName": "John Doe",
+#   "qualificationStatus": "qualified",
+#   "score": {
+#     "id": "score-uuid",
+#     "budget_score": 20,
+#     "authority_score": 22,
+#     "need_score": 18,
+#     "timeline_score": 24,
+#     "total_score": 84,
+#     "reasoning": "Strong enterprise lead with clear CRM need...",
+#     "confidence": 0.85,
+#     "created_at": "2026-01-01T..."
+#   },
+#   "breakdown": {
+#     "budget": { "score": 20, "percentage": 80, "label": "Very High" },
+#     "authority": { "score": 22, "percentage": 88, "label": "Very High" },
+#     "need": { "score": 18, "percentage": 72, "label": "High" },
+#     "timeline": { "score": 24, "percentage": 96, "label": "Very High" },
+#     "total": { "score": 84, "percentage": 84, "label": "Qualified" }
+#   }
+# }
+
+###############################################################################
+# Test 2: Invalid Lead ID Format (Error Case)
+###############################################################################
+
+POST {{baseUrl}}/leads/invalid-uuid/qualify
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+### Expected Response: 400 Bad Request
+# {
+#   "error": {
+#     "code": "INVALID_LEAD_ID",
+#     "message": "Invalid lead ID format. Must be a valid UUID.",
+#     "timestamp": "2026-01-01T..."
+#   }
+# }
+
+###############################################################################
+# Test 3: Lead Not Found (Error Case)
+###############################################################################
+
+POST {{baseUrl}}/leads/550e8400-e29b-41d4-a716-446655440099/qualify
+Authorization: Bearer {{token}}
+Content-Type: application/json
+
+### Expected Response: 404 Not Found
+# {
+#   "error": {
+#     "code": "NOT_FOUND",
+#     "message": "Lead with ID \"...\" not found",
+#     "timestamp": "2026-01-01T..."
+#   }
+# }
+
+###############################################################################
+# Test 4: Missing Authentication (Error Case)
+###############################################################################
+
+POST {{baseUrl}}/leads/{{leadId}}/qualify
+Content-Type: application/json
+
+### Expected Response: 401 Unauthorized
+# {
+#   "error": {
+#     "code": "UNAUTHORIZED",
+#     "message": "Missing or invalid authentication token",
+#     "timestamp": "2026-01-01T..."
+#   }
+# }
+
+###############################################################################
+# cURL Examples
+###############################################################################
+
+# Qualify a lead
+# curl -X POST http://localhost:3005/api/v1/leads/550e8400-e29b-41d4-a716-446655440000/qualify \
+#   -H "Authorization: Bearer YOUR_JWT_TOKEN" \
+#   -H "Content-Type: application/json"
+
+# Check lead with score
+# curl -X GET http://localhost:3005/api/v1/leads/550e8400-e29b-41d4-a716-446655440000 \
+#   -H "Authorization: Bearer YOUR_JWT_TOKEN"
+
+###############################################################################
+# BANT Scoring Reference
+###############################################################################
+
+# Budget (0-25 points):
+#   0-6: No budget or very limited
+#   7-13: Some budget, needs approval
+#   14-19: Budget allocated, minor approval needed
+#   20-25: Budget confirmed and ready
+
+# Authority (0-25 points):
+#   0-6: No decision-making power
+#   7-13: Can influence decision
+#   14-19: Part of decision-making team
+#   20-25: Primary decision-maker
+
+# Need (0-25 points):
+#   0-6: No clear need identified
+#   7-13: Vague or potential need
+#   14-19: Clear need, some urgency
+#   20-25: Critical need, well-defined
+
+# Timeline (0-25 points):
+#   0-6: No timeline or far future
+#   7-13: Long-term consideration (6+ months)
+#   14-19: Medium-term timeline (3-6 months)
+#   20-25: Urgent timeline (<3 months)
+
+# Qualification Status (based on total score):
+#   Total >= 60: qualified
+#   Total 40-59: in_progress
+#   Total < 40: disqualified

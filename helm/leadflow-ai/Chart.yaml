@@ -1,0 +1,23 @@
+apiVersion: v2
+name: leadflow-ai
+description: LeadFlow AI - Lead Management with AI-Powered BANT Qualification
+type: application
+version: 1.0.0
+appVersion: "1.0.0"
+keywords:
+  - lead-management
+  - ai-qualification
+  - bant
+  - crm
+  - sales
+maintainers:
+  - name: LeadFlow AI Team
+    email: team@leadflow-ai.example.com
+home: https://github.com/leadflow-ai/leadflow-ai
+sources:
+  - https://github.com/leadflow-ai/leadflow-ai
+icon: https://leadflow-ai.example.com/icon.png
+dependencies: []
+annotations:
+  category: CRM
+  license: UNLICENSED

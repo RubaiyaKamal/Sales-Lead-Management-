@@ -1,0 +1,221 @@
+name: Deploy to DigitalOcean Kubernetes (DOKS)
+
+on:
+  push:
+    branches:
+      - main
+      - production
+  workflow_dispatch:
+
+env:
+  REGISTRY: ghcr.io
+  IMAGE_NAME_BACKEND: ${{ github.repository }}/backend
+  IMAGE_NAME_NOTIFICATION: ${{ github.repository }}/notification-service
+  IMAGE_NAME_FOLLOWUP: ${{ github.repository }}/follow-up-service
+
+jobs:
+  build-and-push:
+    name: Build and Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract metadata for backend
+        id: meta-backend
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_BACKEND }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push backend image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./backend
+          file: ./backend/Dockerfile
+          push: true
+          tags: ${{ steps.meta-backend.outputs.tags }}
+          labels: ${{ steps.meta-backend.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for notification service
+        id: meta-notification
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_NOTIFICATION }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push notification service image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/notification-service
+          file: ./services/notification-service/Dockerfile
+          push: true
+          tags: ${{ steps.meta-notification.outputs.tags }}
+          labels: ${{ steps.meta-notification.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Extract metadata for follow-up service
+        id: meta-followup
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME_FOLLOWUP }}
+          tags: |
+            type=ref,event=branch
+            type=sha,prefix={{branch}}-
+            type=semver,pattern={{version}}
+            type=raw,value=latest,enable={{is_default_branch}}
+
+      - name: Build and push follow-up service image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./services/follow-up-service
+          file: ./services/follow-up-service/Dockerfile
+          push: true
+          tags: ${{ steps.meta-followup.outputs.tags }}
+          labels: ${{ steps.meta-followup.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  deploy-to-doks:
+    name: Deploy to DOKS with Helm
+    runs-on: ubuntu-latest
+    needs: build-and-push
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/production'
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Install doctl
+        uses: digitalocean/action-doctl@v2
+        with:
+          token: ${{ secrets.DIGITALOCEAN_ACCESS_TOKEN }}
+
+      - name: Save DigitalOcean kubeconfig
+        run: doctl kubernetes cluster kubeconfig save ${{ secrets.DOKS_CLUSTER_NAME }}
+
+      - name: Install Helm
+        uses: azure/setup-helm@v3
+        with:
+          version: '3.13.0'
+
+      - name: Install Dapr CLI
+        run: |
+          wget -q https://raw.githubusercontent.com/dapr/cli/master/install/install.sh -O - | /bin/bash
+          dapr version
+
+      - name: Initialize Dapr on Kubernetes
+        run: |
+          dapr init --kubernetes --wait
+          kubectl get pods -n dapr-system
+
+      - name: Create namespace
+        run: kubectl create namespace leadflow-ai --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Apply Dapr components
+        run: |
+          kubectl apply -f kubernetes/dapr-components/ -n leadflow-ai
+
+      - name: Create Kubernetes secrets
+        run: |
+          # Database secret
+          kubectl create secret generic leadflow-database-secret \
+            --from-literal=DATABASE_URL="${{ secrets.DATABASE_URL }}" \
+            --namespace=leadflow-ai \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # JWT secret
+          kubectl create secret generic leadflow-jwt-secret \
+            --from-literal=JWT_SECRET="${{ secrets.JWT_SECRET }}" \
+            --namespace=leadflow-ai \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Anthropic API key
+          kubectl create secret generic leadflow-anthropic-secret \
+            --from-literal=ANTHROPIC_API_KEY="${{ secrets.ANTHROPIC_API_KEY }}" \
+            --namespace=leadflow-ai \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # SendGrid API key
+          kubectl create secret generic leadflow-sendgrid-secret \
+            --from-literal=SENDGRID_API_KEY="${{ secrets.SENDGRID_API_KEY }}" \
+            --namespace=leadflow-ai \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Twilio credentials
+          kubectl create secret generic leadflow-twilio-secret \
+            --from-literal=TWILIO_ACCOUNT_SID="${{ secrets.TWILIO_ACCOUNT_SID }}" \
+            --from-literal=TWILIO_AUTH_TOKEN="${{ secrets.TWILIO_AUTH_TOKEN }}" \
+            --from-literal=TWILIO_WHATSAPP_NUMBER="${{ secrets.TWILIO_WHATSAPP_NUMBER }}" \
+            --namespace=leadflow-ai \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Redis password (if using managed Redis)
+          kubectl create secret generic leadflow-redis-secret \
+            --from-literal=password="${{ secrets.REDIS_PASSWORD }}" \
+            --namespace=leadflow-ai \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+          # Kafka credentials
+          kubectl create secret generic leadflow-kafka-secret \
+            --from-literal=authType="${{ secrets.KAFKA_AUTH_TYPE }}" \
+            --from-literal=saslUsername="${{ secrets.KAFKA_SASL_USERNAME }}" \
+            --from-literal=saslPassword="${{ secrets.KAFKA_SASL_PASSWORD }}" \
+            --namespace=leadflow-ai \
+            --dry-run=client -o yaml | kubectl apply -f -
+
+      - name: Deploy with Helm
+        run: |
+          helm upgrade --install leadflow-ai ./helm/leadflow-ai \
+            --namespace leadflow-ai \
+            --values ./helm/leadflow-ai/values-prod.yaml \
+            --set backend.image.tag=${{ github.sha }} \
+            --set notificationService.image.tag=${{ github.sha }} \
+            --set followUpService.image.tag=${{ github.sha }} \
+            --wait \
+            --timeout 10m
+
+      - name: Verify deployment
+        run: |
+          kubectl get pods -n leadflow-ai
+          kubectl get svc -n leadflow-ai
+          kubectl get ingress -n leadflow-ai
+
+      - name: Run smoke tests
+        run: |
+          # Wait for backend to be ready
+          kubectl wait --for=condition=ready pod -l app.kubernetes.io/component=backend -n leadflow-ai --timeout=300s
+
+          # Get backend service endpoint
+          BACKEND_URL=$(kubectl get svc leadflow-ai-backend -n leadflow-ai -o jsonpath='{.status.loadBalancer.ingress[0].ip}')
+
+          # Health check
+          curl -f http://${BACKEND_URL}:8000/health/live || exit 1
+          curl -f http://${BACKEND_URL}:8000/health/ready || exit 1
+
+          echo "Deployment successful!"

@@ -1,0 +1,65 @@
+{{- if .Values.followUpService.enabled }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "leadflow-ai.fullname" . }}-followup
+  labels:
+    {{- include "leadflow-ai.followup.labels" . | nindent 4 }}
+spec:
+  replicas: {{ .Values.followUpService.replicaCount }}
+  selector:
+    matchLabels:
+      {{- include "leadflow-ai.followup.selectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      annotations:
+        {{- include "leadflow-ai.followup.daprAnnotations" . | nindent 8 }}
+        checksum/config: {{ include (print $.Template.BasePath "/configmap.yaml") . | sha256sum }}
+      labels:
+        {{- include "leadflow-ai.followup.selectorLabels" . | nindent 8 }}
+    spec:
+      {{- if .Values.serviceAccount.create }}
+      serviceAccountName: {{ include "leadflow-ai.serviceAccountName" . }}
+      {{- end }}
+      containers:
+      - name: follow-up-service
+        image: {{ include "leadflow-ai.followup.image" . }}
+        imagePullPolicy: {{ .Values.followUpService.image.pullPolicy }}
+        ports:
+        - name: http
+          containerPort: 8002
+          protocol: TCP
+        env:
+        {{- range $key, $value := .Values.followUpService.env }}
+        - name: {{ $key }}
+          value: {{ $value | quote }}
+        {{- end }}
+        # Database connection from secret
+        - name: DATABASE_URL
+          valueFrom:
+            secretKeyRef:
+              name: {{ $.Values.secrets.names.database }}
+              key: DATABASE_URL
+        # Kafka configuration
+        {{- if .Values.kafka.brokers }}
+        - name: KAFKA_BROKERS
+          value: {{ join "," .Values.kafka.brokers | quote }}
+        {{- end }}
+        # Load ConfigMap values
+        envFrom:
+        {{- include "leadflow-ai.envFromConfigMap" . | nindent 8 }}
+        livenessProbe:
+          httpGet:
+            path: /health/live
+            port: 8002
+          initialDelaySeconds: 30
+          periodSeconds: 10
+        readinessProbe:
+          httpGet:
+            path: /health/ready
+            port: 8002
+          initialDelaySeconds: 10
+          periodSeconds: 5
+        resources:
+          {{- toYaml .Values.followUpService.resources | nindent 10 }}
+{{- end }}

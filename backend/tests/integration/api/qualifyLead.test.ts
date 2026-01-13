@@ -55,7 +55,7 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         lead_source: LeadSource.WEBSITE,
         status: LeadStatus.NEW,
         qualification_status: QualificationStatus.NOT_QUALIFIED,
-        assigned_to: null,
+        assigned_to: mockUserId,
         created_by: mockUserId,
         metadata: {},
         created_at: new Date('2024-01-01'),
@@ -92,7 +92,6 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         reasoning: 'Strong enterprise lead with clear CRM need.',
         confidence: 0.85,
         created_at: new Date('2024-01-01T12:00:00Z'),
-        created_by: mockUserId,
       };
 
       // Set up mocks
@@ -220,7 +219,7 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         lead_source: LeadSource.WEBSITE,
         status: LeadStatus.NEW,
         qualification_status: QualificationStatus.NOT_QUALIFIED,
-        assigned_to: null,
+        assigned_to: mockUserId,
         created_by: mockUserId,
         metadata: {},
         created_at: new Date('2024-01-01'),
@@ -261,6 +260,41 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         },
       });
     });
+
+    it('should return 404 when sales rep tries to qualify unassigned lead', async () => {
+      const unassignedLead: Lead = {
+        id: mockLeadId,
+        name: 'Unassigned Lead',
+        email: 'unassigned@example.com',
+        phone: null,
+        company: null,
+        lead_source: LeadSource.WEBSITE,
+        status: LeadStatus.NEW,
+        qualification_status: QualificationStatus.NOT_QUALIFIED,
+        assigned_to: 'other-user-456',
+        created_by: 'admin-123',
+        metadata: {},
+        created_at: new Date('2024-01-01'),
+        updated_at: new Date('2024-01-01'),
+        last_contacted_at: null,
+        converted_at: null,
+      };
+
+      (getLeadByIdOrFail as jest.Mock).mockResolvedValue(unassignedLead);
+
+      const response = await request(app)
+        .post(`/api/v1/leads/${mockLeadId}/qualify`)
+        .set('Authorization', `Bearer ${authToken}`)
+        .expect(404);
+
+      expect(response.body).toMatchObject({
+        error: {
+          code: 'NOT_FOUND',
+          message: expect.stringContaining('not found'),
+          timestamp: expect.any(String),
+        },
+      });
+    });
   });
 
   describe('BANT Scoring Logic', () => {
@@ -274,7 +308,7 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         lead_source: LeadSource.REFERRAL,
         status: LeadStatus.NEW,
         qualification_status: QualificationStatus.NOT_QUALIFIED,
-        assigned_to: null,
+        assigned_to: mockUserId,
         created_by: mockUserId,
         metadata: {},
         created_at: new Date('2024-01-01'),
@@ -303,7 +337,6 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         lead_id: mockLeadId,
         ...mockQualificationResult,
         created_at: new Date('2024-01-01T12:00:00Z'),
-        created_by: mockUserId,
       };
 
       (getLeadByIdOrFail as jest.Mock)
@@ -329,10 +362,10 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         email: 'bob@example.com',
         phone: '+1234567890',
         company: 'Wilson Ltd',
-        lead_source: LeadSource.LINKEDIN,
+        lead_source: LeadSource.WEBSITE,
         status: LeadStatus.NEW,
         qualification_status: QualificationStatus.NOT_QUALIFIED,
-        assigned_to: null,
+        assigned_to: mockUserId,
         created_by: mockUserId,
         metadata: {},
         created_at: new Date('2024-01-01'),
@@ -361,7 +394,6 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         lead_id: mockLeadId,
         ...mockQualificationResult,
         created_at: new Date('2024-01-01T12:00:00Z'),
-        created_by: mockUserId,
       };
 
       (getLeadByIdOrFail as jest.Mock)
@@ -388,10 +420,10 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         email: 'alice@example.com',
         phone: '+1234567890',
         company: 'Brown Co',
-        lead_source: LeadSource.COLD_CALL,
+        lead_source: LeadSource.COLD_OUTREACH,
         status: LeadStatus.NEW,
         qualification_status: QualificationStatus.NOT_QUALIFIED,
-        assigned_to: null,
+        assigned_to: mockUserId,
         created_by: mockUserId,
         metadata: {},
         created_at: new Date('2024-01-01'),
@@ -420,7 +452,6 @@ describe('POST /api/v1/leads/:id/qualify', () => {
         lead_id: mockLeadId,
         ...mockQualificationResult,
         created_at: new Date('2024-01-01T12:00:00Z'),
-        created_by: mockUserId,
       };
 
       (getLeadByIdOrFail as jest.Mock)

@@ -1,0 +1,65 @@
+apiVersion: dapr.io/v1alpha1
+kind: Component
+metadata:
+  name: redis-statestore
+  namespace: leadflow-ai
+spec:
+  type: state.redis
+  version: v1
+  metadata:
+    # Redis connection
+    - name: redisHost
+      value: "localhost:6379"  # Override via values-dev.yaml or values-prod.yaml
+
+    # Authentication
+    - name: redisPassword
+      secretKeyRef:
+        name: leadflow-redis-secret
+        key: password
+        optional: true  # No password for local dev
+
+    # Database index
+    - name: redisDB
+      value: "0"
+
+    # TLS for production
+    - name: enableTLS
+      value: "false"  # Set to "true" for production managed Redis
+
+    # Connection pool
+    - name: maxRetries
+      value: "3"
+
+    - name: maxRetryBackoff
+      value: "2s"
+
+    # TTL configuration
+    - name: ttlInSeconds
+      value: "300"  # Default 5-minute cache TTL
+
+    # Failover and sentinel (for HA Redis)
+    - name: failover
+      value: "false"
+
+    # Performance tuning
+    - name: dialTimeout
+      value: "5s"
+
+    - name: readTimeout
+      value: "3s"
+
+    - name: writeTimeout
+      value: "3s"
+
+    - name: poolSize
+      value: "10"
+
+    - name: minIdleConns
+      value: "2"
+
+---
+# State store usage:
+# - Lead list query caching (5-minute TTL)
+# - Individual lead detail caching
+# - Session storage (future)
+# - Rate limiting counters

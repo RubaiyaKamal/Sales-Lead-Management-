@@ -1,0 +1,97 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for local development
+  postgres:
+    image: postgres:15-alpine
+    container_name: leadflow-postgres
+    environment:
+      POSTGRES_DB: leadflow_dev
+      POSTGRES_USER: leadflow
+      POSTGRES_PASSWORD: dev_password_123
+      POSTGRES_HOST_AUTH_METHOD: trust
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./backend/migrations:/docker-entrypoint-initdb.d
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U leadflow -d leadflow_dev"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - leadflow-network
+
+  # Redis for caching and Dapr state store
+  redis:
+    image: redis:7-alpine
+    container_name: leadflow-redis
+    ports:
+      - "6379:6379"
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    networks:
+      - leadflow-network
+
+  # Redpanda (Kafka-compatible) for event streaming
+  redpanda:
+    image: redpandadata/redpanda:latest
+    container_name: leadflow-redpanda
+    command:
+      - redpanda start
+      - --kafka-addr PLAINTEXT://0.0.0.0:29092,OUTSIDE://0.0.0.0:9092
+      - --advertise-kafka-addr PLAINTEXT://redpanda:29092,OUTSIDE://localhost:9092
+      - --pandaproxy-addr 0.0.0.0:8082
+      - --advertise-pandaproxy-addr localhost:8082
+      - --rpc-addr 0.0.0.0:33145
+      - --advertise-rpc-addr redpanda:33145
+      - --smp 1
+      - --memory 1G
+      - --mode dev-container
+      - --default-log-level=info
+    ports:
+      - "9092:9092"     # Kafka API
+      - "8082:8082"     # Pandaproxy (REST API)
+      - "9644:9644"     # Admin API
+    volumes:
+      - redpanda_data:/var/lib/redpanda/data
+    healthcheck:
+      test: ["CMD-SHELL", "rpk cluster health | grep -E 'Healthy:.+true' || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 45s
+    networks:
+      - leadflow-network
+
+  # Redpanda Console (UI for Kafka topics, messages)
+  redpanda-console:
+    image: redpandadata/console:latest
+    container_name: leadflow-redpanda-console
+    depends_on:
+      - redpanda
+    environment:
+      KAFKA_BROKERS: redpanda:29092
+    ports:
+      - "8080:8080"
+    networks:
+      - leadflow-network
+
+volumes:
+  postgres_data:
+    driver: local
+  redis_data:
+    driver: local
+  redpanda_data:
+    driver: local
+
+networks:
+  leadflow-network:
+    driver: bridge

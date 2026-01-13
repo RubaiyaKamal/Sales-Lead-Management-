@@ -18,7 +18,6 @@ import {
 import { ActivityAction } from '../models/ActivityLog';
 import { UserRole } from '../models/User';
 import {
-  executeQuery,
   executeQueryOne,
   executeQueryAll,
   executeTransaction,
@@ -31,12 +30,9 @@ import {
   publishLeadDeleted,
 } from './DaprPubSubService';
 import {
-  getCached,
-  setCached,
   invalidateLeadCaches,
   CacheNamespace,
   generateLeadListCacheKey,
-  generateLeadDetailCacheKey,
   getOrCompute,
 } from './DaprStateService';
 import { v4 as uuidv4 } from 'uuid';
@@ -121,12 +117,12 @@ export async function createLead(
         request.leadSource,
         LeadStatus.NEW, // Default status
         QualificationStatus.NOT_QUALIFIED, // Default qualification status
-        null, // assigned_to (unassigned by default)
+        createdBy, // Auto-assign to creator (RBAC: sales reps can only see assigned leads)
         createdBy,
         JSON.stringify(request.metadata || {}),
       ]);
 
-      const newLead = insertResult.rows[0];
+      const newLead = insertResult.rows[0]!;
 
       // Create activity log entry
       const activityLogQuery = `
@@ -148,7 +144,7 @@ export async function createLead(
         leadId,
         createdBy,
         ActivityAction.CREATE,
-        `Lead "${newLead.name}" created`,
+        `Lead "${newLead!.name}" created`,
         JSON.stringify({
           leadSource: request.leadSource,
           company: request.company,
@@ -158,9 +154,9 @@ export async function createLead(
 
       logger.info(
         {
-          leadId: newLead.id,
+          leadId: newLead!.id,
           email: newLead.email,
-          name: newLead.name,
+          name: newLead!.name,
         },
         'Lead created successfully in database'
       );
@@ -616,7 +612,7 @@ export async function updateLead(
           throw new NotFoundError(`Lead with ID "${leadId}" not found`);
         }
 
-        const current = currentLead.rows[0];
+        const current = currentLead.rows[0]!;
 
         // Optimistic locking check
         if (previousUpdatedAt) {
@@ -627,7 +623,7 @@ export async function updateLead(
             logger.warn(
               {
                 leadId,
-                currentUpdatedAt: current.updated_at,
+                currentUpdatedAt: current.updated_at!,
                 providedUpdatedAt: previousUpdatedAt,
               },
               'Optimistic locking conflict detected'
@@ -636,7 +632,7 @@ export async function updateLead(
             throw new ConflictError(
               'Lead was modified by another user. Please refresh and try again.',
               {
-                currentUpdatedAt: current.updated_at,
+                currentUpdatedAt: current.updated_at!,
                 providedUpdatedAt: previousUpdatedAt,
               }
             );
@@ -743,7 +739,7 @@ export async function updateLead(
         params.push(leadId);
 
         const updateResult = await client.query<Lead>(updateQuery, params);
-        const updatedLead = updateResult.rows[0];
+        const updatedLead = updateResult.rows[0]!;
 
         // Create activity log entry
         const activityLogQuery = `
@@ -895,8 +891,7 @@ export async function createLeadScore(
     );
 
     // Execute in transaction to ensure atomicity
-    const { leadScore, lead, previousQualificationStatus } =
-      await executeTransaction(async (client) => {
+    const { leadScore, lead } = await executeTransaction(async (client) => {
         // Get current lead
         const leadQuery = 'SELECT * FROM leads WHERE id = $1';
         const leadResult = await client.query<Lead>(leadQuery, [leadId]);
@@ -905,8 +900,8 @@ export async function createLeadScore(
           throw new NotFoundError(`Lead with ID "${leadId}" not found`);
         }
 
-        const currentLead = leadResult.rows[0];
-        const previousQualStatus = currentLead.qualification_status;
+        const currentLead = leadResult.rows[0]!;
+        const previousQualStatus = currentLead.qualification_status!;
 
         // Insert lead score
         const insertScoreQuery = `
@@ -955,7 +950,7 @@ export async function createLeadScore(
           leadId,
         ]);
 
-        const updatedLead = leadUpdateResult.rows[0];
+        const updatedLead = leadUpdateResult.rows[0]!;
 
         // Create activity log entry
         const activityLogQuery = `
@@ -1022,20 +1017,20 @@ export async function createLeadScore(
     }
 
     // Publish lead.qualified event if status changed to qualified (outside transaction, best effort)
-    if (lead.qualification_status === QualificationStatus.QUALIFIED) {
+    if (lead!.qualification_status === QualificationStatus.QUALIFIED) {
       try {
         await publishLeadQualified({
-          leadId: lead.id,
-          leadName: lead.name,
-          leadEmail: lead.email,
+          leadId: lead!.id,
+          leadName: lead!.name,
+          leadEmail: lead!.email,
           totalScore,
-          qualificationStatus: lead.qualification_status,
-          assignedTo: lead.assigned_to,
+          qualificationStatus: lead!.qualification_status,
+          assignedTo: lead!.assigned_to,
         });
 
         logger.info(
           {
-            leadId: lead.id,
+            leadId: lead!.id,
             totalScore,
           },
           'Lead qualified event published'
@@ -1044,7 +1039,7 @@ export async function createLeadScore(
         logger.error(
           {
             error: eventError,
-            leadId: lead.id,
+            leadId: lead!.id,
           },
           'Failed to publish lead.qualified event (non-fatal)'
         );
@@ -1183,7 +1178,7 @@ export async function deleteLead(
         throw new NotFoundError(`Lead with ID "${leadId}" not found`);
       }
 
-      const lead = leadResult.rows[0];
+      const lead = leadResult.rows[0]!;
 
       // Create activity log for deletion
       await client.query(
@@ -1220,7 +1215,7 @@ export async function deleteLead(
       logger.info(
         {
           leadId,
-          leadEmail: lead.email,
+          leadEmail: lead!.email,
           deletedBy,
         },
         'Lead deleted successfully'
@@ -1229,7 +1224,7 @@ export async function deleteLead(
       // Publish lead.deleted event (after transaction commits)
       await publishLeadDeleted({
         leadId,
-        leadEmail: lead.email,
+        leadEmail: lead!.email,
         deletedBy,
         reason: options?.reason,
         gdprRequest: options?.gdprRequest || false,

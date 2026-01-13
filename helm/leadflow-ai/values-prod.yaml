@@ -1,0 +1,249 @@
+# Production values for DigitalOcean Kubernetes (DOKS)
+# Security-hardened configuration for production deployment
+
+global:
+  environment: production
+  domain: api.leadflow-ai.example.com
+
+backend:
+  replicaCount: 3
+
+  image:
+    repository: ghcr.io/leadflow-ai/backend
+    pullPolicy: IfNotPresent
+    tag: "1.0.0"  # Pin to specific version
+
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    PORT: "8000"
+    # Sensitive values loaded from Kubernetes Secrets
+    # DATABASE_URL: from secret "leadflow-database-secret"
+    # JWT_SECRET: from secret "leadflow-jwt-secret"
+    # ANTHROPIC_API_KEY: from secret "leadflow-anthropic-secret"
+    # REDIS_PASSWORD: from secret "leadflow-redis-secret"
+
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+    allowPrivilegeEscalation: false
+
+notificationService:
+  replicaCount: 2
+
+  image:
+    repository: ghcr.io/leadflow-ai/notification-service
+    pullPolicy: IfNotPresent
+    tag: "1.0.0"
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    # SENDGRID_API_KEY: from secret
+    # TWILIO_ACCOUNT_SID: from secret
+    # TWILIO_AUTH_TOKEN: from secret
+
+followUpService:
+  replicaCount: 2  # For high availability
+
+  image:
+    repository: ghcr.io/leadflow-ai/follow-up-service
+    pullPolicy: IfNotPresent
+    tag: "1.0.0"
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+  cron:
+    schedule: "*/30 * * * *"  # Every 30 minutes
+
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+
+# Ingress with TLS and rate limiting
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+    nginx.ingress.kubernetes.io/cors-allow-origin: "https://app.leadflow-ai.example.com"
+    nginx.ingress.kubernetes.io/cors-allow-methods: "GET, POST, PATCH, DELETE, OPTIONS"
+    nginx.ingress.kubernetes.io/cors-allow-credentials: "true"
+    nginx.ingress.kubernetes.io/enable-modsecurity: "true"
+    nginx.ingress.kubernetes.io/enable-owasp-core-rules: "true"
+  hosts:
+    - host: api.leadflow-ai.example.com
+      paths:
+        - path: /api/v1
+          pathType: Prefix
+          backend:
+            service:
+              name: leadflow-backend
+              port: 8000
+  tls:
+    - secretName: leadflow-ai-tls
+      hosts:
+        - api.leadflow-ai.example.com
+
+# External dependencies (managed services)
+postgresql:
+  # Neon DB serverless PostgreSQL
+  host: ep-example-123456.us-east-2.aws.neon.tech  # Replace with actual Neon DB host
+  port: 5432
+  database: leadflow_production
+  username: leadflow_prod
+  sslMode: require
+
+redis:
+  # DigitalOcean Managed Redis or external service
+  host: leadflow-redis.db.ondigitalocean.com  # Replace with actual host
+  port: 25061  # Managed Redis typically uses non-standard port
+  # password: from secret "leadflow-redis-secret"
+  tls: true
+
+kafka:
+  # Redpanda Cloud serverless
+  brokers:
+    - seed-123abc.cloud.redpanda.com:9092  # Replace with actual Redpanda host
+  saslEnabled: true
+  saslMechanism: SCRAM-SHA-256
+  # saslUsername: from secret "leadflow-kafka-secret"
+  # saslPassword: from secret "leadflow-kafka-secret"
+
+# Monitoring and observability
+monitoring:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      scrapeTimeout: 10s
+      labels:
+        release: prometheus-operator
+
+  grafana:
+    enabled: true
+    dashboards:
+      enabled: true
+
+  logging:
+    level: info
+    format: json
+
+# ConfigMap
+configMap:
+  create: true
+  data:
+    AI_QUALIFICATION_TIMEOUT: "5000"
+    CACHE_TTL_SECONDS: "300"
+    RATE_LIMIT_WINDOW_MS: "3600000"
+    RATE_LIMIT_MAX_REQUESTS: "100"
+    DATABASE_POOL_MIN: "2"
+    DATABASE_POOL_MAX: "10"
+    CORS_ORIGIN: "https://app.leadflow-ai.example.com"
+
+# Secrets (managed via External Secrets Operator or Sealed Secrets)
+secrets:
+  create: false  # Managed externally for security
+  names:
+    database: leadflow-database-secret
+    jwt: leadflow-jwt-secret
+    anthropic: leadflow-anthropic-secret
+    sendgrid: leadflow-sendgrid-secret
+    twilio: leadflow-twilio-secret
+    redis: leadflow-redis-secret
+    kafka: leadflow-kafka-secret
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2  # At least 2 pods must be available during updates
+
+# Network policies (strict network segmentation)
+networkPolicy:
+  enabled: true
+  policyTypes:
+    - Ingress
+    - Egress
+  ingress:
+    - from:
+        - namespaceSelector:
+            matchLabels:
+              name: ingress-nginx
+      ports:
+        - protocol: TCP
+          port: 8000
+  egress:
+    - to:
+        - namespaceSelector: {}
+      ports:
+        - protocol: TCP
+          port: 5432  # PostgreSQL
+        - protocol: TCP
+          port: 25061  # Redis
+        - protocol: TCP
+          port: 9092  # Kafka
+        - protocol: TCP
+          port: 443  # HTTPS for external APIs (Anthropic, SendGrid, etc.)
+
+# Node affinity for high availability
+affinity:
+  podAntiAffinity:
+    preferredDuringSchedulingIgnoredDuringExecution:
+      - weight: 100
+        podAffinityTerm:
+          labelSelector:
+            matchExpressions:
+              - key: app
+                operator: In
+                values:
+                  - leadflow-backend
+          topologyKey: kubernetes.io/hostname
+
+# Tolerations for dedicated node pools (if using DOKS node pools)
+tolerations: []
+
+# Service Account with IRSA/Workload Identity (if using AWS IRSA or GCP Workload Identity)
+serviceAccount:
+  create: true
+  name: leadflow-ai-sa
+  annotations:
+    # For AWS IRSA: eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT_ID:role/leadflow-ai-role
+    # For GCP Workload Identity: iam.gke.io/gcp-service-account: leadflow-ai@PROJECT_ID.iam.gserviceaccount.com

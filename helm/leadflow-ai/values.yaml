@@ -1,0 +1,260 @@
+# Default values for leadflow-ai Helm chart
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Global configuration
+global:
+  environment: production
+  domain: api.leadflow-ai.example.com
+
+# Backend API configuration
+backend:
+  enabled: true
+  replicaCount: 3
+
+  image:
+    repository: ghcr.io/leadflow-ai/backend
+    pullPolicy: IfNotPresent
+    tag: "1.0.0"
+
+  service:
+    type: ClusterIP
+    port: 8000
+    targetPort: 8000
+    annotations: {}
+
+  # Dapr configuration
+  dapr:
+    enabled: true
+    appId: leadflow-backend
+    appPort: 8000
+    appProtocol: http
+    logLevel: info
+    enableMetrics: true
+    metricsPort: 9090
+
+  # Resource limits and requests
+  resources:
+    limits:
+      cpu: 1000m
+      memory: 1Gi
+    requests:
+      cpu: 500m
+      memory: 512Mi
+
+  # Horizontal Pod Autoscaler
+  autoscaling:
+    enabled: true
+    minReplicas: 3
+    maxReplicas: 10
+    targetCPUUtilizationPercentage: 70
+    targetMemoryUtilizationPercentage: 80
+
+  # Health checks
+  livenessProbe:
+    httpGet:
+      path: /health/live
+      port: 8000
+    initialDelaySeconds: 30
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /health/ready
+      port: 8000
+    initialDelaySeconds: 10
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 3
+
+  # Environment variables
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    PORT: "8000"
+    # Database connection (from secrets)
+    # DATABASE_URL: set via secret
+    # JWT_SECRET: set via secret
+    # ANTHROPIC_API_KEY: set via secret
+
+  # Security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1001
+    fsGroup: 1001
+    capabilities:
+      drop:
+        - ALL
+    readOnlyRootFilesystem: false
+
+# Notification Service configuration
+notificationService:
+  enabled: true
+  replicaCount: 2
+
+  image:
+    repository: ghcr.io/leadflow-ai/notification-service
+    pullPolicy: IfNotPresent
+    tag: "1.0.0"
+
+  dapr:
+    enabled: true
+    appId: notification-service
+    appPort: 8001
+    appProtocol: http
+    logLevel: info
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+    # SENDGRID_API_KEY: set via secret
+    # TWILIO_ACCOUNT_SID: set via secret
+    # TWILIO_AUTH_TOKEN: set via secret
+
+# Follow-up Service configuration
+followUpService:
+  enabled: true
+  replicaCount: 1
+
+  image:
+    repository: ghcr.io/leadflow-ai/follow-up-service
+    pullPolicy: IfNotPresent
+    tag: "1.0.0"
+
+  dapr:
+    enabled: true
+    appId: follow-up-service
+    appPort: 8002
+    appProtocol: http
+    logLevel: info
+
+  resources:
+    limits:
+      cpu: 500m
+      memory: 512Mi
+    requests:
+      cpu: 250m
+      memory: 256Mi
+
+  # Cron schedule (every 30 minutes)
+  cron:
+    schedule: "*/30 * * * *"
+
+  env:
+    NODE_ENV: production
+    LOG_LEVEL: info
+
+# Ingress configuration
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/rate-limit: "100"
+  hosts:
+    - host: api.leadflow-ai.example.com
+      paths:
+        - path: /api/v1
+          pathType: Prefix
+          backend:
+            service:
+              name: leadflow-backend
+              port: 8000
+  tls:
+    - secretName: leadflow-ai-tls
+      hosts:
+        - api.leadflow-ai.example.com
+
+# External dependencies configuration
+postgresql:
+  enabled: false  # Using external Neon DB
+  host: ""  # Set in environment-specific values
+  port: 5432
+  database: leadflow
+  username: leadflow
+  sslMode: require
+
+redis:
+  enabled: false  # Using external managed Redis or cluster-local
+  host: ""  # Set in environment-specific values
+  port: 6379
+  password: ""  # Set via secret
+
+kafka:
+  enabled: false  # Using external Redpanda Cloud
+  brokers: []  # Set in environment-specific values
+  saslEnabled: true
+  saslMechanism: SCRAM-SHA-256
+
+# Monitoring and observability
+monitoring:
+  prometheus:
+    enabled: true
+    serviceMonitor:
+      enabled: true
+      interval: 30s
+      scrapeTimeout: 10s
+
+  grafana:
+    enabled: false  # Managed separately
+
+  logging:
+    level: info
+    format: json
+
+# ConfigMap for shared configuration
+configMap:
+  create: true
+  data:
+    AI_QUALIFICATION_TIMEOUT: "5000"
+    CACHE_TTL_SECONDS: "300"
+    RATE_LIMIT_WINDOW_MS: "3600000"
+    RATE_LIMIT_MAX_REQUESTS: "100"
+
+# Secrets (references to Kubernetes Secrets)
+secrets:
+  create: true
+  # Actual secret values should be managed via external secret management
+  # (e.g., Sealed Secrets, External Secrets Operator, or manual kubectl apply)
+  names:
+    database: leadflow-database-secret
+    jwt: leadflow-jwt-secret
+    anthropic: leadflow-anthropic-secret
+    sendgrid: leadflow-sendgrid-secret
+    twilio: leadflow-twilio-secret
+    redis: leadflow-redis-secret
+    kafka: leadflow-kafka-secret
+
+# Service Account
+serviceAccount:
+  create: true
+  name: leadflow-ai-sa
+  annotations: {}
+
+# Pod disruption budget
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 1
+
+# Network policies
+networkPolicy:
+  enabled: false  # Enable in production for stricter network segmentation
+
+# Node selector, affinity, and tolerations
+nodeSelector: {}
+
+affinity: {}
+
+tolerations: []
